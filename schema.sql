@@ -30,5 +30,13 @@ CREATE TABLE IF NOT EXISTS nudges.recommendations (
   status VARCHAR(16) NOT NULL DEFAULT 'proposed',
   decided_by VARCHAR(64), decided_at TIMESTAMP, decision_note VARCHAR(512),
   created_at TIMESTAMP DEFAULT GETDATE(),
-  pushed_at TIMESTAMP, push_error VARCHAR(512)
+  pushed_at TIMESTAMP, push_error VARCHAR(512),
+  next_url VARCHAR(512), next_title VARCHAR(255)
 ) DISTKEY (user_id) SORTKEY (created_at);
+
+CREATE TABLE IF NOT EXISTS nudges.content_items (
+  course_id BIGINT NOT NULL, module_id BIGINT NOT NULL, module_position INT, module_name VARCHAR(255),
+  module_item_id BIGINT NOT NULL, item_position INT, item_type VARCHAR(32), content_id BIGINT,
+  title VARCHAR(255), url VARCHAR(512), topics VARCHAR(255), difficulty VARCHAR(16),
+  is_practice BOOLEAN DEFAULT FALSE, computed_at TIMESTAMP DEFAULT GETDATE()
+) DISTSTYLE ALL SORTKEY (course_id, module_position, item_position);

@@ -77,8 +77,9 @@ must carry the same tag or cleanup will walk past it. The namespace and workgrou
 
 ## 4. Data model
 
-Schema `nudges` holds three tables. The first two are inputs the agent reads. The third is the
-agent's queue and audit trail, created here so the agent has no DDL of its own.
+Schema `nudges` holds four tables. The first two are inputs the agent reads. The third is the
+agent's queue and audit trail, created here so the agent has no DDL of its own. The fourth is a
+small dimension that tags the course's module items.
 
 ```mermaid
 erDiagram
@@ -134,10 +135,32 @@ erDiagram
         timestamp created_at
         timestamp pushed_at
         varchar push_error
+        varchar next_url
+        varchar next_title
+    }
+    content_items {
+        bigint course_id PK
+        bigint module_id
+        int module_position
+        varchar module_name
+        bigint module_item_id PK
+        int item_position
+        varchar item_type
+        bigint content_id
+        varchar title
+        varchar url
+        varchar topics
+        varchar difficulty
+        boolean is_practice
+        timestamp computed_at
     }
     student_course_status ||--o{ assignment_status : "user_id, course_id"
     student_course_status ||--o{ recommendations : "user_id, course_id"
+    content_items ||--o{ recommendations : "url copied to next_url"
 ```
+
+The last line is a copy, not a key. The resolver reads `content_items.url` and writes the string
+into `recommendations.next_url`, so nothing joins the two tables back together by id.
 
 ### 4.1 Design notes
 
@@ -161,6 +184,27 @@ erDiagram
 - **`dedupe_key`** is `rule|course_id|user_id|subject|date`. It has no unique constraint
   because Redshift does not enforce them; the agent checks for existing keys before inserting.
 - **`IDENTITY(1,1)`** on `recommendations.id` gives the approval page a stable handle per row.
+
+### 4.2 Item tagging table
+
+Canvas has no item-level topic tagging. The modules API returns a title, a type and an
+`html_url` for each item and says nothing about what the item teaches. `content_items` is the
+external bridge that supplies the missing facts. It maps every module item of the course to its
+SAT topics, a difficulty band, and a practice flag.
+
+`load_content_items.py` builds it from the live course, joining each module item to the
+hand-written `seed/content_tags.csv` on exact title. The CSV is the only place a human edits.
+An item with no tag row still loads, with NULL topics and `is_practice` false, and the loader
+prints a warning so the gap is visible.
+
+The nudge agent's next-step resolver reads this table. It picks the practice item whose topics
+match the student's weak area and writes that item's title and url onto the recommendation. The
+CSV therefore decides what "do this next" means for every rule.
+
+`topics` is a comma-separated list in a plain VARCHAR. A SUPER array would need `JSON_PARSE` on
+write and unnest syntax on read, which nothing else in this schema uses, and a `LIKE '%Reading%'`
+answers the resolver's question today. `DISTSTYLE ALL` puts the whole table on every slice
+because it is small and every rule joins it.
 
 ## 5. Seed loading
 
@@ -224,6 +268,9 @@ AWS CLI profile.
 | `schema.sql` | DDL for the schema and three tables | every statement is `IF NOT EXISTS` |
 | `query.py` | `--sql` prints a result table, `--file` applies a script | n/a |
 | `load_seed.py` | CSVs to tables with the id map | truncates before inserting |
+| `migrations/*.sql` | ALTER statements that `schema.sql` cannot express | every statement is guarded by `migrate.py` |
+| `migrate.py` | apply each migration file in name order | checks `information_schema.columns` before each ADD COLUMN |
+| `load_content_items.py` | Canvas module items plus the tag CSV to `content_items` | deletes the course's rows before inserting |
 | `cleanup.py` | list tagged ARNs; delete with `--yes` | deletes tolerate already-gone resources |
 
 `data_api.py` is the single Redshift primitive. `run` returns rows as dicts with the Data API's
@@ -265,6 +312,7 @@ Run on 15 September 2026, in order. Each unit was green before the next started.
 | schema | apply twice | 4 statements each time, 3 tables present |
 | load | run twice | counts 10 and 18 both times |
 | cleanup | dry run | 3 ARNs listed, nothing deleted |
+| content items | schema twice, migrate twice, load twice | 5 statements and 4 tables each time, 2 columns added then both "already present", 12 rows both loads |
 
 ## 9. Limits and future work
 
