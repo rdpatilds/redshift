@@ -1,0 +1,11 @@
+course_id,user_id,name,days_inactive,assignments_submitted,assignments_late,assignments_missing,assignments_excused,assignments_due_3d_unsubmitted,quizzes_complete,quizzes_in_progress,quizzes_untaken,quiz_avg_percent,module_requirement_completed,module_requirement_count,current_score,logins_7d,risk_score,risk_level
+1,2,Ava Patel,0,6,0,0,0,0,2,0,0,100,12,12,95,6,0.00,low
+1,3,Ben Okafor,2,4,2,1,0,0,1,0,1,67,7,12,71,3,0.25,low
+1,4,Chloe Nguyen,1,3,0,0,0,2,0,1,1,,5,12,40,4,0.07,low
+1,5,Dev Sharma,9,2,0,2,0,1,0,0,2,,3,12,25,0,0.46,medium
+1,6,Elena Rossi,14,0,0,3,0,2,0,0,2,,0,12,0,0,0.77,high
+1,7,Farah Haddad,0,6,1,0,0,0,2,0,0,50,10,12,60,5,0.06,low
+1,8,Gabriel Silva,0,5,0,0,0,1,1,0,1,100,9,12,83,4,0.00,low
+1,9,Hana Sato,3,4,0,0,2,0,2,0,0,83,9,12,80,2,0.03,low
+1,10,Ibrahim Khan,5,1,1,2,0,2,0,1,1,,2,12,20,1,0.51,medium
+1,11,Julia Costa,6,3,3,0,0,2,1,0,1,67,6,12,73,1,0.23,low
