@@ -77,9 +77,10 @@ must carry the same tag or cleanup will walk past it. The namespace and workgrou
 
 ## 4. Data model
 
-Schema `nudges` holds four tables. The first two are inputs the agent reads. The third is the
+Schema `nudges` holds five tables. The first two are inputs the agent reads. The third is the
 agent's queue and audit trail, created here so the agent has no DDL of its own. The fourth is a
-small dimension that tags the course's module items.
+small dimension that tags the course's module items. The fifth is the ordered path the agent
+computes for each student and the LTI dashboard renders.
 
 ```mermaid
 erDiagram
@@ -154,8 +155,20 @@ erDiagram
         boolean is_practice
         timestamp computed_at
     }
+    learning_paths {
+        bigint course_id PK
+        bigint user_id PK
+        smallint position PK
+        bigint module_item_id
+        varchar title
+        varchar url
+        varchar reason
+        varchar source_rule
+        timestamp generated_at
+    }
     student_course_status ||--o{ assignment_status : "user_id, course_id"
     student_course_status ||--o{ recommendations : "user_id, course_id"
+    student_course_status ||--o{ learning_paths : "user_id, course_id"
     content_items ||--o{ recommendations : "url copied to next_url"
 ```
 
@@ -205,6 +218,26 @@ CSV therefore decides what "do this next" means for every rule.
 write and unnest syntax on read, which nothing else in this schema uses, and a `LIKE '%Reading%'`
 answers the resolver's question today. `DISTSTYLE ALL` puts the whole table on every slice
 because it is small and every rule joins it.
+
+### 4.3 Learning paths
+
+`learning_paths` is what one student should do next, in order, one row per step. The agent computes
+that order and stores the result, so the table holds no rule. Anything missing comes first, then
+anything due soon, then a quiz left in progress, then a practice item for the topic the student is
+weakest in. Only after those does the course's own module order fill the rest. The list stops at
+eight steps. A list longer than that is a backlog, not a next action.
+
+Each row carries the module item it points at, the title and url the dashboard renders, a short
+`reason` for the student, and the `source_rule` that placed the step. The `source_rule` is what lets
+you trace a surprising path back to the rule that built it. The LTI dashboard reads the rows for the
+signed-in student in `position` order and renders what it finds.
+
+The remediation module is why the path cannot be course order alone. "Remediation: Heart of Algebra"
+is hidden from the course by default and becomes visible to one student only when a Canvas module
+override names them. The agent reads those overrides from Canvas each time it generates a path, so
+the module's items reach a path only for the students who can open them. The override stays in
+Canvas and is never copied into Redshift. This table holds no visibility rule of its own, which
+means no stale copy of one can put a hidden item on a student's screen.
 
 ## 5. Seed loading
 
@@ -265,7 +298,7 @@ AWS CLI profile.
 |---|---|---|
 | `provision.py` | create subnet, namespace, workgroup; wait for AVAILABLE; print ARNs | each resource is looked up by name before creation |
 | `data_api.py` | shared `run` and `run_many` over the Data API; not run directly | n/a |
-| `schema.sql` | DDL for the schema and three tables | every statement is `IF NOT EXISTS` |
+| `schema.sql` | DDL for the schema and five tables | every statement is `IF NOT EXISTS` |
 | `query.py` | `--sql` prints a result table, `--file` applies a script | n/a |
 | `load_seed.py` | CSVs to tables with the id map | truncates before inserting |
 | `migrations/*.sql` | ALTER statements that `schema.sql` cannot express | every statement is guarded by `migrate.py` |
@@ -313,6 +346,7 @@ Run on 15 September 2026, in order. Each unit was green before the next started.
 | load | run twice | counts 10 and 18 both times |
 | cleanup | dry run | 3 ARNs listed, nothing deleted |
 | content items | schema twice, migrate twice, load twice | 5 statements and 4 tables each time, 2 columns added then both "already present", 12 rows both loads |
+| learning paths | schema twice, load content items twice | 6 statements and 5 tables each time, `learning_paths` created with 9 columns and 0 rows, content_items 14 rows both loads |
 
 ## 9. Limits and future work
 

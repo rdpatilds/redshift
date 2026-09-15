@@ -40,3 +40,10 @@ CREATE TABLE IF NOT EXISTS nudges.content_items (
   title VARCHAR(255), url VARCHAR(512), topics VARCHAR(255), difficulty VARCHAR(16),
   is_practice BOOLEAN DEFAULT FALSE, computed_at TIMESTAMP DEFAULT GETDATE()
 ) DISTSTYLE ALL SORTKEY (course_id, module_position, item_position);
+
+CREATE TABLE IF NOT EXISTS nudges.learning_paths (
+  course_id BIGINT NOT NULL, user_id BIGINT NOT NULL, position SMALLINT NOT NULL,
+  module_item_id BIGINT, title VARCHAR(255), url VARCHAR(512),
+  reason VARCHAR(64), source_rule VARCHAR(64),
+  generated_at TIMESTAMP DEFAULT GETDATE()
+) DISTKEY (user_id) SORTKEY (course_id, user_id, position);
