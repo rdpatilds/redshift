@@ -36,11 +36,22 @@ def canvas_modules(course_id):
         return json.load(response)
 
 
+REMEDIATION_PREFIX = "Remediation: "
+
+
+def remediation_tag(module_name):
+    """An item inside a remediation module is practice on that module's topic by construction,
+    which is what lets generated quizzes land tagged without a hand-written CSV row."""
+    if not module_name.startswith(REMEDIATION_PREFIX):
+        return None
+    return {"topics": module_name[len(REMEDIATION_PREFIX):], "difficulty": "practice", "is_practice": "true"}
+
+
 def build_rows(course_id, modules, tags):
     rows = []
     for module in sorted(modules, key=lambda m: m["position"]):
         for item in sorted(module.get("items", []), key=lambda i: i["position"]):
-            tag = tags.get(item["title"])
+            tag = tags.get(item["title"]) or remediation_tag(module["name"])
             if tag is None:
                 print(f"no content_tags.csv row for {item['title']}, loading it untagged")
             rows.append({

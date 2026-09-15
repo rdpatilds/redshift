@@ -1,6 +1,6 @@
 # Redshift POC: Architecture and Design
 
-Status: implemented and verified on 15 September 2026. Companion to the agent that consumes
+Status: implemented and verified on 15 and 16 September 2026. Companion to the agent that consumes
 this data, documented in the `nudge-agent` repository under `docs/ARCHITECTURE.md`.
 
 ## 1. Purpose
@@ -77,10 +77,11 @@ must carry the same tag or cleanup will walk past it. The namespace and workgrou
 
 ## 4. Data model
 
-Schema `nudges` holds five tables. The first two are inputs the agent reads. The third is the
+Schema `nudges` holds six tables. The first two are inputs the agent reads. The third is the
 agent's queue and audit trail, created here so the agent has no DDL of its own. The fourth is a
 small dimension that tags the course's module items. The fifth is the ordered path the agent
-computes for each student and the LTI dashboard renders.
+computes for each student and the LTI dashboard renders. The sixth is the pool of quiz questions
+the agent draws from by topic.
 
 ```mermaid
 erDiagram
@@ -166,6 +167,18 @@ erDiagram
         varchar source_rule
         timestamp generated_at
     }
+    question_pool {
+        bigint course_id PK
+        bigint question_id PK
+        varchar topic
+        varchar difficulty
+        varchar question_type
+        varchar question_text
+        super answers
+        float points
+        varchar source
+        timestamp computed_at
+    }
     student_course_status ||--o{ assignment_status : "user_id, course_id"
     student_course_status ||--o{ recommendations : "user_id, course_id"
     student_course_status ||--o{ learning_paths : "user_id, course_id"
@@ -174,6 +187,8 @@ erDiagram
 
 The last line is a copy, not a key. The resolver reads `content_items.url` and writes the string
 into `recommendations.next_url`, so nothing joins the two tables back together by id.
+`question_pool` has no line at all. It is a pool the agent reads by topic, and nothing joins it
+by key.
 
 ### 4.1 Design notes
 
@@ -206,7 +221,7 @@ external bridge that supplies the missing facts. It maps every module item of th
 SAT topics, a difficulty band, and a practice flag.
 
 `load_content_items.py` builds it from the live course, joining each module item to the
-hand-written `seed/content_tags.csv` on exact title. The CSV is the only place a human edits.
+hand-written `seed/content_tags.csv` on exact title. The CSV is the only place a human edits. One rule sits beside the CSV. An item in a module named `Remediation: <topic>` that has no CSV row defaults to that topic and `is_practice` true, because a generated practice quiz has no hand-written row and would otherwise drop out of every path on the next reload.
 An item with no tag row still loads, with NULL topics and `is_practice` false, and the loader
 prints a warning so the gap is visible.
 
@@ -238,6 +253,32 @@ override names them. The agent reads those overrides from Canvas each time it ge
 the module's items reach a path only for the students who can open them. The override stays in
 Canvas and is never copied into Redshift. This table holds no visibility rule of its own, which
 means no stale copy of one can put a hidden item on a student's screen.
+
+### 4.4 Question pool
+
+`question_pool` is the stand-in for Kaplan QBank as a data source. The POC needed a question
+source and had no QBank access, so the questions in `seed/question_pool.csv` were written for
+this POC. None of them came from QBank.
+
+Each row carries a topic, a difficulty band, a question type, the question text, the answer
+options, the points the question is worth, and its provenance in `source`. `source` is
+`qbank-stand-in` on all 16 rows.
+
+`answers` is SUPER and holds a JSON array of `{"text", "correct"}` objects. The option count
+is not fixed, so a column per option would be a guess, and `recommendations.reason` already uses
+SUPER, so the type costs the schema nothing new. The loader emits each cell with `JSON_PARSE`, so
+Redshift parses on write and the array comes back navigable, for example `answers[1].correct`.
+
+`DISTSTYLE ALL` with `SORTKEY (course_id, topic, question_id)` follows the same reasoning as
+`content_items`. The table is small and every read is "give me the questions for one topic", so
+the whole table sits on every slice and one topic is one sorted range.
+
+The nudge agent's quiz push reads the pool by topic, picks questions for the student's weak area,
+and delivers them to Canvas as a classic quiz through the MCP tool. The pool is the content.
+Canvas is the delivery.
+
+If real QBank content ever arrives, it lands in the same table with a different `source` value,
+so nothing downstream changes.
 
 ## 5. Seed loading
 
@@ -304,6 +345,7 @@ AWS CLI profile.
 | `migrations/*.sql` | ALTER statements that `schema.sql` cannot express | every statement is guarded by `migrate.py` |
 | `migrate.py` | apply each migration file in name order | checks `information_schema.columns` before each ADD COLUMN |
 | `load_content_items.py` | Canvas module items plus the tag CSV to `content_items` | deletes the course's rows before inserting |
+| `load_question_pool.py` | the question CSV for one course to `question_pool` | deletes the course's rows before inserting, in the same batch |
 | `cleanup.py` | list tagged ARNs; delete with `--yes` | deletes tolerate already-gone resources |
 
 `data_api.py` is the single Redshift primitive. `run` returns rows as dicts with the Data API's
@@ -334,7 +376,7 @@ The scheduled tasks and the Canvas seed users live outside AWS and are removed s
 
 ## 8. Verification record
 
-Run on 15 September 2026, in order. Each unit was green before the next started.
+Run on 15 and 16 September 2026, in order. Each unit was green before the next started.
 
 | Unit | Check | Result |
 |---|---|---|
@@ -347,6 +389,7 @@ Run on 15 September 2026, in order. Each unit was green before the next started.
 | cleanup | dry run | 3 ARNs listed, nothing deleted |
 | content items | schema twice, migrate twice, load twice | 5 statements and 4 tables each time, 2 columns added then both "already present", 12 rows both loads |
 | learning paths | schema twice, load content items twice | 6 statements and 5 tables each time, `learning_paths` created with 9 columns and 0 rows, content_items 14 rows both loads |
+| question pool | schema twice, load twice, read `answers` back for Heart of Algebra | 7 statements each time, 10 columns on `question_pool`, 16 rows both loads, Heart of Algebra 5, Problem Solving and Data Analysis 4, Reading 4, Writing and Language 3 both times, `answers` came back as parsed JSON |
 
 ## 9. Limits and future work
 

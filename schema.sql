@@ -47,3 +47,9 @@ CREATE TABLE IF NOT EXISTS nudges.learning_paths (
   reason VARCHAR(64), source_rule VARCHAR(64),
   generated_at TIMESTAMP DEFAULT GETDATE()
 ) DISTKEY (user_id) SORTKEY (course_id, user_id, position);
+
+CREATE TABLE IF NOT EXISTS nudges.question_pool (
+  course_id BIGINT NOT NULL, question_id BIGINT NOT NULL, topic VARCHAR(64), difficulty VARCHAR(16),
+  question_type VARCHAR(32), question_text VARCHAR(2048), answers SUPER, points FLOAT,
+  source VARCHAR(32) DEFAULT 'qbank-stand-in', computed_at TIMESTAMP DEFAULT GETDATE()
+) DISTSTYLE ALL SORTKEY (course_id, topic, question_id);
