@@ -2,12 +2,15 @@
 # requires-python = ">=3.12"
 # dependencies = ["boto3>=1.34"]
 # ///
-"""Tear down everything tagged Project=canvas. Dry run unless --yes is passed."""
+"""Tear down everything tagged Project=canvas, plus the streaming stack that streaming.py
+built, walked backwards through the same resource table. Dry run unless --yes is passed."""
 import argparse
 import time
 
 import boto3
 from botocore.exceptions import ClientError
+
+from streaming import RESOURCES
 
 REGION = "us-east-1"
 NAME = "canvas"
@@ -81,9 +84,14 @@ def main():
     arns = tagged_arns()
     for arn in arns:
         print(arn)
+    for resource in RESOURCES:
+        print(resource.name)
     if not args.yes:
         print("dry run, pass --yes to delete")
         return
+    for resource in reversed(RESOURCES):
+        if resource.delete:
+            resource.delete()
     delete_workgroup()
     delete_namespace()
     delete_subnets(arns)
