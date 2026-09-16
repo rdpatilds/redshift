@@ -15,6 +15,8 @@ Redshift Serverless behind the Canvas nudges POC. Each script is a flat PEP 723 
 - `streaming.py` creates the Kinesis stream that Canvas writes Live Events to, the Firehose copy to S3, the two IAM roles, the producer IAM user, and the Redshift objects that read the stream. See Streaming below.
 - `streaming.sql` holds the external schema over Kinesis, the streaming materialized view, and the flattened view on top of it. `streaming.py` substitutes the IAM role ARN and applies it.
 - `streaming_refresh.py` refreshes the materialized view and prints what landed in Redshift and in S3.
+- `streaming_canvas.py` writes the Kinesis stream name, region, and producer credentials into the Canvas checkout's `config/dynamic_settings.yml` and restarts `web` and `jobs`. See Streaming below.
+- `streaming_check.py` is the rerunnable end-to-end proof that Canvas Live Events reach Redshift and S3. See Streaming below.
 - `cleanup.py` lists and deletes the tagged resources.
 
 **`seed/question_pool.csv` is not Kaplan QBank.** The questions in it were written for this POC, because the POC needed a question source and had no QBank access. No Kaplan QBank content was used or copied. The `source` column records `qbank-stand-in` on every row, so the provenance is queryable.
@@ -40,11 +42,13 @@ Canvas Live Events reach the warehouse through one Kinesis stream with two reade
 
 ```
 uv run streaming.py
-# point Canvas at the stream, then restart web and jobs
-uv run streaming_refresh.py
+uv run streaming_canvas.py
+uv run streaming_check.py
 ```
 
-`streaming.py` prints the values Canvas needs when it finishes. The `live_events.yml` block in the Canvas checkout's `config/dynamic_settings.yml` wants `kinesis_stream_name: canvas` and `aws_region: us-east-1`, plus the two keys from `.canvas-live-events.env` as `aws_access_key_id` and `aws_secret_access_key_dec`. Drop `aws_endpoint` from that block so the SDK talks to AWS instead of the local fake. `.canvas-live-events.env` holds a live secret, so `streaming.py` adds it to `.gitignore` before writing it.
+`streaming.py` prints the values Canvas needs when it finishes. `streaming_canvas.py` writes them into the Canvas checkout's `config/dynamic_settings.yml` and restarts the `web` and `jobs` containers so the new config takes effect, then polls the API until it answers. It only wires the config and proves nothing by itself. `streaming_check.py` is the end-to-end proof. It creates an assignment, submits it as a student, and grades it, each tagged with a run id, then waits out the Firehose buffer and asserts the resulting `assignment_created` and `submission_created` events are in `raw.live_events` and that S3 got a fresh object. Rerun it any time to reprove the pipeline; each run's id keeps it distinguishable from the last.
+
+`config/initializers/live_events.rb` reads `DynamicSettings.find(tree: :private)`, so the `live_events.yml` block has to live under `development.private.canvas` in `dynamic_settings.yml`, not `development.config.canvas`, which is where the checkout ships a stub pointing at a local kinesalite endpoint. That `config:` block is dead config the initializer never reads; `streaming_canvas.py` leaves it alone and writes `kinesis_stream_name: canvas`, `aws_region: us-east-1`, and the two keys from `.canvas-live-events.env` as `aws_access_key_id` and `aws_secret_access_key_dec` under the `private` tree instead. It's idempotent: a rerun with unchanged keys is a no-op and skips the restart. `.canvas-live-events.env` holds a live secret, so `streaming.py` adds it to `.gitignore` before writing it.
 
 Everything is named `canvas` where the service allows one name.
 
